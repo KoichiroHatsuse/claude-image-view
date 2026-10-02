@@ -5,6 +5,8 @@ A Claude Code mod that shows the images you paste, so you see thumbnails above y
 [![License](https://img.shields.io/github/license/jarrodwatts/claude-image-view?v=2)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/jarrodwatts/claude-image-view)](https://github.com/jarrodwatts/claude-image-view/stargazers)
 
+![Claude Image View in action](claude-image-view.png)
+
 ## Install
 
 Inside Claude Code, run:
