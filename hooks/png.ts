@@ -7,7 +7,7 @@
 /** A picture shrunk to at most THUMB pixels a side: RGB, 3 bytes a pixel, row-major. */
 export type Thumb = { width: number; height: number; rgb: Uint8Array; source: { width: number; height: number } }
 
-const THUMB = 256
+const THUMB = 64
 // ponytail: transparent pixels are blended onto one dark grey, not the terminal's background;
 // pasted screenshots are opaque, so read the terminal's colours if logos with alpha matter.
 const BACKDROP = 0x1e

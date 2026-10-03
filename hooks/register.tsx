@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PastedImage } from '../types'
-import { IMAGE_TILE, RASTER_TILE, fitRow, imageNumbers, pngSize } from './layout'
+import { fitRow, imageNumbers, pngSize } from './layout'
 import type { Size } from './layout'
 import { decodePng, fromBase64, rasterCells, toBase64 } from './png'
 import type { Thumb } from './png'
@@ -89,6 +89,14 @@ async function describe($: EngineInterface, dir: string | undefined, n: number):
   return { n, path, size: entry.size, thumbKey: entry.thumb ? key : undefined }
 }
 
+// Opens the original in the OS's own viewer, since a thumbnail (a mosaic most of all) only
+// tells pictures apart. argv, no shell: the path goes to the viewer as one argument.
+async function openImage($: EngineInterface, path: string) {
+  if ((await $.env.get('OS')) === 'Windows_NT') return $.process.run(['explorer.exe', path.replaceAll('/', '\\')])
+  const isMac = (await $.process.run(['uname'])).stdout.trim() === 'Darwin'
+  return $.process.run([isMac ? 'open' : 'xdg-open', path])
+}
+
 async function show($: EngineInterface, draft: string) {
   const numbers = imageNumbers(draft)
   const key = numbers.join(',')
@@ -122,9 +130,8 @@ export const register: Register = on => {
     const list = await read($, images)
     if (list.length === 0) return next(e)
 
-    const { Box, Image, Raster, Text } = $.ui.resolve(e)
-    const tile = drawsPixels ? IMAGE_TILE : RASTER_TILE
-    const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns, tile)
+    const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
+    const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns)
     const below = await next(e)
 
     return (
@@ -155,7 +162,22 @@ export const register: Register = on => {
                     alt={`[Image #${image.n}]`}
                   />
                 )}
-                <Text dimColor>#{image.n}</Text>
+                {image.path === null ? (
+                  <Text dimColor>#{image.n}</Text>
+                ) : (
+                  // A click, or the digit while the band has the focus (ctrl+x tab), opens it.
+                  <Button
+                    key={`open-${image.n}`}
+                    label={`#${image.n} open`}
+                    hotkey={image.n <= 9 ? String(image.n) : undefined}
+                    plain
+                    dimColor
+                    onPress={() => {
+                      const path = image.path
+                      if (path !== null) openImage($, path).catch(() => $.ui.toast(`Couldn't open image #${image.n}`))
+                    }}
+                  />
+                )}
               </Box>
             )
           })}

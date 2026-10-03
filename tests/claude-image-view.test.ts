@@ -100,6 +100,12 @@ async function pasted($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], p
   )
   on('fs.read', () => ({ value: { base64: paste.png } }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+  // What the open button runs; uname answers as macOS does.
+  const runs: (readonly string[])[] = []
+  on('process.run', ($, e) => {
+    runs.push(e.argv)
+    return { value: { exitCode: 0, stdout: 'Darwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.advance(200)
@@ -110,12 +116,12 @@ async function pasted($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], p
     await clock.advance(200)
     return $.ui.mount({ ...BAND, surface: 'terminal' })
   }
-  return { ui, clear }
+  return { ui, clear, runs }
 }
 
 test('in Ghostty a pasted image shows as pixels and clears when the draft does', async ($, on) => {
   const dir = '/tmp/claude-501/-work/sess-1/images'
-  const { ui, clear } = await pasted($, on, {
+  const { ui, clear, runs } = await pasted($, on, {
     env: { CLAUDE_CODE_TMPDIR: '/tmp/claude-501', TERM: 'xterm-ghostty' },
     dir,
     png: pngHead(800, 400),
@@ -124,6 +130,10 @@ test('in Ghostty a pasted image shows as pixels and clears when the draft does',
   expect(image?.props).toMatchObject({ source: { file: `${dir}/1.png`, format: 'png' }, columns: 24, rows: 6 })
   // #2 has no cached file, so it gets a placeholder tile instead of a broken Image.
   expect(await ui.find({ type: 'Text', text: 'no preview' })).toBeDefined()
+  // The label under it opens the original on macOS; #2, with nothing to open, has no button.
+  await ui.press({ key: 'open-1' })
+  expect(runs.at(-1)).toEqual(['open', `${dir}/1.png`])
+  expect(await ui.find({ key: 'open-2' })).toBeUndefined()
 
   // Sending the prompt empties the box.
   const after = await clear()
@@ -132,18 +142,21 @@ test('in Ghostty a pasted image shows as pixels and clears when the draft does',
 })
 
 test('in Windows Terminal the cache is found under %TEMP% and drawn as a Raster', async ($, on) => {
-  const { ui } = await pasted($, on, {
-    env: { TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp', TERM_PROGRAM: 'vscode' },
+  const { ui, runs } = await pasted($, on, {
+    env: { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp', TERM_PROGRAM: 'vscode' },
     dir: '/Users/me/AppData/Local/Temp/claude/-work/sess-1/images',
     png: RGBW,
   })
   expect(await ui.find({ type: 'Image' })).toBeUndefined()
   const raster = await ui.find({ type: 'Raster' })
-  // A square gets twice the box an Image would (12x6), to make up for the coarse blocks.
-  expect(raster?.props).toMatchObject({ key: 'image-1', columns: 24, rows: 12 })
+  // A square gets the same 12x6 box an Image would.
+  expect(raster?.props).toMatchObject({ key: 'image-1', columns: 12, rows: 6 })
   const words = new Uint32Array(fromBase64(String(raster?.props.cells)).buffer)
-  expect(words.length).toBe(24 * 12 * 3)
+  expect(words.length).toBe(12 * 6 * 3)
   // The top-left cell lies wholly in the red pixel: a full block.
   expect([...words.slice(0, 3)]).toEqual([0x2588, 0xff0000, 0xff0000])
   expect(await ui.find({ type: 'Text', text: 'no preview' })).toBeDefined()
+  // Explorer opens it in the default viewer, given a Windows path.
+  await ui.press({ key: 'open-1' })
+  expect(runs).toEqual([['explorer.exe', 'C:\\Users\\me\\AppData\\Local\\Temp\\claude\\-work\\sess-1\\images\\1.png']])
 })

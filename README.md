@@ -49,6 +49,7 @@ Paste one or more images and a row of thumbnails sits above the prompt, each lab
 - **Thumbnails keep their shape.** Wide screenshots stay wide and phone shots stay tall.
 - **Always fits on screen.** Tiles shrink to fit the space above the prompt, so the row never scrolls or gets cut off.
 - **Clears on send.** Once the prompt is sent (or the tags are deleted), the row goes away.
+- **Opens the original.** Click the `#1 open` label under a tile (or press `ctrl+x tab`, then the digit) to open the full image in your OS's viewer: Photos on Windows, Preview on macOS, `xdg-open` on Linux.
 
 ## How It Works
 
@@ -58,11 +59,11 @@ Claude Code saves every pasted image to a cache folder for the session, as `<tmp
 2. For each tag it finds the cached PNG and reads its size from the PNG header.
 3. It draws the thumbnails in the band above the prompt:
    - **In Ghostty or kitty**, with Claude Code's `Image` element. The terminal reads the file itself and draws the real pixels.
-   - **In every other terminal** (Windows Terminal, iTerm2, Terminal.app, VS Code's terminal, tmux), the mod decodes the PNG itself and draws it with the `Raster` element as a mosaic of quadrant blocks (`▀ ▐ ▚ ▟` …), four pixels a cell in two colours, in tiles up to 64x12 cells. It's coarse (text in a screenshot stays unreadable), but enough to tell which picture is which.
+   - **In every other terminal** (Windows Terminal, iTerm2, Terminal.app, VS Code's terminal, tmux), the mod decodes the PNG itself and draws it with the `Raster` element as a mosaic of quadrant blocks (`▀ ▐ ▚ ▟` …), four pixels a cell in two colours. It's coarse (text in a screenshot stays unreadable), so open the original to read it.
 
 ## Security
 
-Claude Image View is local-only. It makes no network requests and writes no files. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image. If neither `CLAUDE_CODE_TMPDIR` nor `TEMP` is set, it runs `id -u` once to find the default temp folder. The PNG decoder (`hooks/png.ts`) is plain TypeScript in this repo, with no dependencies.
+Claude Image View is local-only. It makes no network requests and writes no files. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image. If neither `CLAUDE_CODE_TMPDIR` nor `TEMP` is set, it runs `id -u` once to find the default temp folder. Opening an original runs `explorer.exe`, `open` or `xdg-open` with the image's path (and `uname` once to tell macOS from Linux), never through a shell. The PNG decoder (`hooks/png.ts`) is plain TypeScript in this repo, with no dependencies.
 
 Run `claude plugin validate` on the repo to see every event it hooks and every call it makes.
 
