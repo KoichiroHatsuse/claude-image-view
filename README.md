@@ -80,6 +80,12 @@ Other terminals show `[Image #n]` in each tile instead of the picture. The Claud
 
 **The tile shows `[Image #1]` text instead of the picture.** Your terminal doesn't support the kitty graphics protocol. See [Requirements](#requirements).
 
+**The tile shows `[Image #1]` text in agent view or a background session, even in Ghostty or kitty.** Claude Code turns terminal images off for background sessions. If you attach from a terminal with the kitty graphics protocol, turn them back on in the `env` block of `~/.claude/settings.json`, then start a new session:
+
+```json
+"env": { "CLAUDE_CODE_FORCE_TERMINAL_IMAGES": "1" }
+```
+
 ## Development
 
 ```bash
