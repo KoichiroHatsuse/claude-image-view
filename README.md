@@ -58,7 +58,7 @@ Claude Code saves every pasted image to a cache folder for the session, as `<tmp
 2. For each tag it finds the cached PNG and reads its size from the PNG header.
 3. It draws the thumbnails in the band above the prompt:
    - **In Ghostty or kitty**, with Claude Code's `Image` element. The terminal reads the file itself and draws the real pixels.
-   - **In every other terminal** (Windows Terminal, iTerm2, Terminal.app, VS Code's terminal, tmux), the mod decodes the PNG itself and draws it with the `Raster` element as a mosaic of half blocks (`▀`), two pixels a cell. It's coarse, but enough to tell which picture is which.
+   - **In every other terminal** (Windows Terminal, iTerm2, Terminal.app, VS Code's terminal, tmux), the mod decodes the PNG itself and draws it with the `Raster` element as a mosaic of quadrant blocks (`▀ ▐ ▚ ▟` …), four pixels a cell in two colours, in tiles up to 64x12 cells. It's coarse (text in a screenshot stays unreadable), but enough to tell which picture is which.
 
 ## Security
 
@@ -70,7 +70,7 @@ Run `claude plugin validate` on the repo to see every event it hooks and every c
 
 - Claude Code v2.1.287 or later (mods support)
 - macOS, Linux or Windows
-- For the real pixels, a terminal with the kitty graphics protocol, such as [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/). Other terminals get the half-block mosaic; it needs 24-bit colour to look right.
+- For the real pixels, a terminal with the kitty graphics protocol, such as [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/). Other terminals get the block mosaic; it needs 24-bit colour to look right.
 
 Pasted images over 4 MiB get no mosaic, since the mod can't read files that big. The Claude Desktop app already previews pasted images, so the mod draws nothing there.
 

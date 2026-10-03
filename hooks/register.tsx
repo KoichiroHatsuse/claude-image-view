@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PastedImage } from '../types'
-import { fitRow, imageNumbers, pngSize } from './layout'
+import { IMAGE_TILE, RASTER_TILE, fitRow, imageNumbers, pngSize } from './layout'
 import type { Size } from './layout'
 import { decodePng, fromBase64, rasterCells, toBase64 } from './png'
 import type { Thumb } from './png'
@@ -19,7 +19,7 @@ let found: { sessionId: string; dir: string } | undefined
 // while a drawn image's file is still missing, so the next poll looks again.
 let shownKey: string | undefined
 let isChecking = false
-// Whether the terminal draws Image pixels; elsewhere each picture is a Raster of half blocks.
+// Whether the terminal draws Image pixels; elsewhere each picture is a Raster of quadrant blocks.
 let drawsPixels = false
 // Keyed by path, size and mtime, so a file that failed to decode isn't read again until it changes.
 const decoded = new Map<string, { size: Size | null; thumb: Thumb | null } | null>()
@@ -123,7 +123,8 @@ export const register: Register = on => {
     if (list.length === 0) return next(e)
 
     const { Box, Image, Raster, Text } = $.ui.resolve(e)
-    const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns)
+    const tile = drawsPixels ? IMAGE_TILE : RASTER_TILE
+    const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns, tile)
     const below = await next(e)
 
     return (

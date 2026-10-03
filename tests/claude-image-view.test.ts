@@ -59,12 +59,15 @@ const BAND = {
 // A 2x2 PNG: red, green over blue, white.
 const RGBW = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DAAMIM/////w8AH+4F+7C4l8kAAAAASUVORK5CYII='
 
-test('a 2x2 PNG decodes to its pixels and draws as half blocks', () => {
+test('a 2x2 PNG decodes to its pixels and draws as quadrant blocks', () => {
   const thumb = decodePng(fromBase64(RGBW))
   expect(thumb?.source).toEqual({ width: 2, height: 2 })
   expect([...(thumb?.rgb ?? [])]).toEqual([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255])
-  // One cell a column: the top pixel is the foreground of an upper half block, the bottom one its background.
+  // Stretched to 2x1 cells, each cell's top two pixels are one colour and its bottom two another: an upper half block.
   expect([...rasterCells(thumb!, 2, 1)]).toEqual([0x2580, 0xff0000, 0x0000ff, 0x2580, 0x00ff00, 0xffffff])
+  // One cell of a checkerboard: the diagonal quadrant block, white on black.
+  const checker = { width: 2, height: 2, rgb: Uint8Array.of(255, 255, 255, 0, 0, 0, 0, 0, 0, 255, 255, 255), source: { width: 2, height: 2 } }
+  expect([...rasterCells(checker, 1, 1)]).toEqual([0x259a, 0xffffff, 0x000000])
   expect(decodePng(fromBase64(pngHead(10, 10)))).toBeNull()
 })
 
@@ -136,10 +139,11 @@ test('in Windows Terminal the cache is found under %TEMP% and drawn as a Raster'
   })
   expect(await ui.find({ type: 'Image' })).toBeUndefined()
   const raster = await ui.find({ type: 'Raster' })
-  // A square keeps the same 12x6 box an Image would get.
-  expect(raster?.props).toMatchObject({ key: 'image-1', columns: 12, rows: 6 })
+  // A square gets twice the box an Image would (12x6), to make up for the coarse blocks.
+  expect(raster?.props).toMatchObject({ key: 'image-1', columns: 24, rows: 12 })
   const words = new Uint32Array(fromBase64(String(raster?.props.cells)).buffer)
-  expect(words.length).toBe(12 * 6 * 3)
-  expect([...words.slice(0, 3)]).toEqual([0x2580, 0xff0000, 0xff0000])
+  expect(words.length).toBe(24 * 12 * 3)
+  // The top-left cell lies wholly in the red pixel: a full block.
+  expect([...words.slice(0, 3)]).toEqual([0x2588, 0xff0000, 0xff0000])
   expect(await ui.find({ type: 'Text', text: 'no preview' })).toBeDefined()
 })

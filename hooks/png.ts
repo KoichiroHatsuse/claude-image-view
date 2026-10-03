@@ -1,13 +1,13 @@
 // A PNG decoder small enough to read: the hooks module has no zlib, no DecompressionStream
 // and no WebAssembly, so a terminal without the kitty graphics protocol gets its picture
-// from these bytes, drawn as half-block cells.
+// from these bytes, drawn as quadrant-block cells.
 //
 // Indexing below is bounds-checked by the loops around it, hence the `!`s.
 
 /** A picture shrunk to at most THUMB pixels a side: RGB, 3 bytes a pixel, row-major. */
 export type Thumb = { width: number; height: number; rgb: Uint8Array; source: { width: number; height: number } }
 
-const THUMB = 64
+const THUMB = 256
 // ponytail: transparent pixels are blended onto one dark grey, not the terminal's background;
 // pasted screenshots are opaque, so read the terminal's colours if logos with alpha matter.
 const BACKDROP = 0x1e
@@ -72,24 +72,79 @@ export function decodePng(bytes: Uint8Array): Thumb | null {
   return { width: tw, height: th, rgb, source: { width, height } }
 }
 
+// Quadrant block for each mask of lit corners: 8 top-left, 4 top-right, 2 bottom-left, 1 bottom-right.
+const QUADRANTS = [
+  0x20, 0x2597, 0x2596, 0x2584, 0x259d, 0x2590, 0x259e, 0x259f,
+  0x2598, 0x259a, 0x258c, 0x2599, 0x2580, 0x259c, 0x259b, 0x2588,
+]
+
 /**
- * The Raster `cells` for a thumb drawn `columns` by `rows`: each cell is an upper half
- * block, its foreground the pixel above and its background the pixel below.
+ * The Raster `cells` for a thumb drawn `columns` by `rows`. Each cell covers 2x2 pixels
+ * (a cell is twice as tall as wide, so they're square) and draws them as a quadrant block
+ * in two colours: of the ways to split the four into foreground and background, the one
+ * that strays least from the real pixels.
  */
 export function rasterCells(thumb: Thumb, columns: number, rows: number): Uint32Array {
+  const grid = shrink(thumb, columns * 2, rows * 2)
   const words = new Uint32Array(columns * rows * 3)
-  const at = (x: number, y: number) => {
-    const py = Math.min(thumb.height - 1, Math.floor((y * thumb.height) / (rows * 2)))
-    const px = Math.min(thumb.width - 1, Math.floor((x * thumb.width) / columns))
-    const i = (py * thumb.width + px) * 3
-    return (thumb.rgb[i]! << 16) | (thumb.rgb[i + 1]! << 8) | thumb.rgb[i + 2]!
-  }
+  const quad = new Float64Array(12)
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < columns; x++) {
-      words.set([0x2580, at(x, y * 2), at(x, y * 2 + 1)], (y * columns + x) * 3)
+      for (let q = 0; q < 4; q++) {
+        const i = ((y * 2 + (q >> 1)) * columns * 2 + x * 2 + (q & 1)) * 3
+        quad.set(grid.subarray(i, i + 3), q * 3)
+      }
+      let best = { error: Infinity, mask: 15, fg: 0, bg: 0 }
+      // Masks 8-15 hold the top-left pixel in the foreground (the rest are the same splits
+      // flipped); 15 first, so a flat cell is a full block.
+      for (let mask = 15; mask >= 8; mask--) {
+        const fg = mean(quad, mask)
+        const bg = mask === 15 ? fg : mean(quad, 15 ^ mask)
+        let error = 0
+        for (let q = 0; q < 4; q++) {
+          const colour = mask & (8 >> q) ? fg : bg
+          for (let c = 0; c < 3; c++) error += (quad[q * 3 + c]! - colour[c]!) ** 2
+        }
+        if (error < best.error) best = { error, mask, fg: pack(fg), bg: pack(bg) }
+      }
+      words.set([QUADRANTS[best.mask]!, best.fg, best.bg], (y * columns + x) * 3)
     }
   }
   return words
+}
+
+function mean(quad: Float64Array, mask: number): number[] {
+  const sum = [0, 0, 0]
+  let n = 0
+  for (let q = 0; q < 4; q++) {
+    if (!(mask & (8 >> q))) continue
+    for (let c = 0; c < 3; c++) sum[c]! += quad[q * 3 + c]!
+    n++
+  }
+  return sum.map(v => v / n)
+}
+
+const pack = ([r, g, b]: number[]) => (Math.round(r!) << 16) | (Math.round(g!) << 8) | Math.round(b!)
+
+// Box-averages a thumb down (or nearest-samples it up) to width x height RGB.
+function shrink(thumb: Thumb, width: number, height: number): Float64Array {
+  const out = new Float64Array(width * height * 3)
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.floor((y * thumb.height) / height)
+    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * thumb.height) / height))
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.floor((x * thumb.width) / width)
+      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * thumb.width) / width))
+      const at = (y * width + x) * 3
+      for (let ty = y0; ty < y1; ty++) {
+        for (let tx = x0; tx < x1; tx++) {
+          for (let c = 0; c < 3; c++) out[at + c]! += thumb.rgb[(ty * thumb.width + tx) * 3 + c]!
+        }
+      }
+      for (let c = 0; c < 3; c++) out[at + c]! /= (y1 - y0) * (x1 - x0)
+    }
+  }
+  return out
 }
 
 // Writes the pixel at byte `i` of an unfiltered line into `out` as RGBA.
