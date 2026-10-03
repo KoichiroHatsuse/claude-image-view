@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 import { fitCells, fitRow, imageNumbers, pngSize } from '../hooks/layout'
-import { decodePng, rasterCells } from '../hooks/png'
+import { decodePng, fromBase64, rasterCells } from '../hooks/png'
 
 function pngHead(width: number, height: number): string {
   const bytes = new Uint8Array(33)
@@ -59,18 +60,18 @@ const BAND = {
 const RGBW = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DAAMIM/////w8AH+4F+7C4l8kAAAAASUVORK5CYII='
 
 test('a 2x2 PNG decodes to its pixels and draws as half blocks', () => {
-  const thumb = decodePng(Uint8Array.fromBase64(RGBW))
+  const thumb = decodePng(fromBase64(RGBW))
   expect(thumb?.source).toEqual({ width: 2, height: 2 })
   expect([...(thumb?.rgb ?? [])]).toEqual([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255])
   // One cell a column: the top pixel is the foreground of an upper half block, the bottom one its background.
   expect([...rasterCells(thumb!, 2, 1)]).toEqual([0x2580, 0xff0000, 0x0000ff, 0x2580, 0x00ff00, 0xffffff])
-  expect(decodePng(Uint8Array.fromBase64(pngHead(10, 10)))).toBeNull()
+  expect(decodePng(fromBase64(pngHead(10, 10)))).toBeNull()
 })
 
 type Paste = { env: Record<string, string>; dir: string; png: string }
 
 // Mounts the band after #1 is pasted (and #2 named with no file behind it).
-async function pasted($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1], paste: Paste) {
+async function pasted($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], paste: Paste) {
   const clock = mock.clock(on)
   const root = paste.dir.split('/').slice(0, -3).join('/')
   let draft = 'see [Image #1] [Image #2]'
@@ -137,7 +138,7 @@ test('in Windows Terminal the cache is found under %TEMP% and drawn as a Raster'
   const raster = await ui.find({ type: 'Raster' })
   // A square keeps the same 12x6 box an Image would get.
   expect(raster?.props).toMatchObject({ key: 'image-1', columns: 12, rows: 6 })
-  const words = new Uint32Array(Uint8Array.fromBase64(String(raster?.props.cells)).buffer)
+  const words = new Uint32Array(fromBase64(String(raster?.props.cells)).buffer)
   expect(words.length).toBe(12 * 6 * 3)
   expect([...words.slice(0, 3)]).toEqual([0x2580, 0xff0000, 0xff0000])
   expect(await ui.find({ type: 'Text', text: 'no preview' })).toBeDefined()

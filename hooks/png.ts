@@ -1,6 +1,8 @@
 // A PNG decoder small enough to read: the hooks module has no zlib, no DecompressionStream
 // and no WebAssembly, so a terminal without the kitty graphics protocol gets its picture
 // from these bytes, drawn as half-block cells.
+//
+// Indexing below is bounds-checked by the loops around it, hence the `!`s.
 
 /** A picture shrunk to at most THUMB pixels a side: RGB, 3 bytes a pixel, row-major. */
 export type Thumb = { width: number; height: number; rgb: Uint8Array; source: { width: number; height: number } }
@@ -8,7 +10,7 @@ export type Thumb = { width: number; height: number; rgb: Uint8Array; source: { 
 const THUMB = 64
 // ponytail: transparent pixels are blended onto one dark grey, not the terminal's background;
 // pasted screenshots are opaque, so read the terminal's colours if logos with alpha matter.
-const BACKDROP = [0x1e, 0x1e, 0x1e]
+const BACKDROP = 0x1e
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }
 
 /** Shrinks a PNG to a Thumb, or null when it isn't an 8-bit, non-interlaced PNG this reads. */
@@ -18,11 +20,12 @@ export function decodePng(bytes: Uint8Array): Thumb | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const width = view.getUint32(16)
   const height = view.getUint32(20)
-  const [depth, colorType, , , interlace] = bytes.subarray(24, 29)
+  const depth = bytes[24]!
+  const colorType = bytes[25]!
   const channels = CHANNELS[colorType]
-  if (!width || !height || depth !== 8 || channels === undefined || interlace !== 0) return null
+  if (!width || !height || depth !== 8 || channels === undefined || bytes[28] !== 0) return null
 
-  let palette = new Uint8Array(0)
+  let palette: Uint8Array = new Uint8Array(0)
   const idat: Uint8Array[] = []
   for (let at = 8; at + 8 <= bytes.length; ) {
     const length = view.getUint32(at)
@@ -48,24 +51,24 @@ export function decodePng(bytes: Uint8Array): Thumb | null {
   const th = Math.max(1, Math.round(height * scale))
   const sums = new Float64Array(tw * th * 3)
   const counts = new Uint32Array(tw * th)
+  const rgba = [0, 0, 0, 0]
   let prior = new Uint8Array(stride)
   let line = new Uint8Array(stride)
   for (let y = 0; y < height; y++) {
     const start = y * (stride + 1)
-    if (!unfilter(raw[start], raw.subarray(start + 1, start + 1 + stride), prior, line, channels)) return null
+    if (!unfilter(raw[start]!, raw.subarray(start + 1, start + 1 + stride), prior, line, channels)) return null
     const row = Math.min(th - 1, Math.floor(y * scale))
     for (let x = 0; x < width; x++) {
-      const [r, g, b, a] = pixel(line, x * channels, colorType, palette)
+      pixel(line, x * channels, colorType, palette, rgba)
+      const alpha = rgba[3]!
       const cell = row * tw + Math.min(tw - 1, Math.floor(x * scale))
-      sums[cell * 3] += (r * a + BACKDROP[0] * (255 - a)) / 255
-      sums[cell * 3 + 1] += (g * a + BACKDROP[1] * (255 - a)) / 255
-      sums[cell * 3 + 2] += (b * a + BACKDROP[2] * (255 - a)) / 255
-      counts[cell]++
+      for (let c = 0; c < 3; c++) sums[cell * 3 + c]! += (rgba[c]! * alpha + BACKDROP * (255 - alpha)) / 255
+      counts[cell]!++
     }
     ;[prior, line] = [line, prior]
   }
   const rgb = new Uint8Array(tw * th * 3)
-  for (let i = 0; i < rgb.length; i++) rgb[i] = Math.round(sums[i] / Math.max(1, counts[Math.floor(i / 3)]))
+  for (let i = 0; i < rgb.length; i++) rgb[i] = Math.round(sums[i]! / Math.max(1, counts[Math.floor(i / 3)]!))
   return { width: tw, height: th, rgb, source: { width, height } }
 }
 
@@ -76,9 +79,10 @@ export function decodePng(bytes: Uint8Array): Thumb | null {
 export function rasterCells(thumb: Thumb, columns: number, rows: number): Uint32Array {
   const words = new Uint32Array(columns * rows * 3)
   const at = (x: number, y: number) => {
-    const i = (Math.min(thumb.height - 1, Math.floor((y * thumb.height) / (rows * 2))) * thumb.width +
-      Math.min(thumb.width - 1, Math.floor((x * thumb.width) / columns))) * 3
-    return (thumb.rgb[i] << 16) | (thumb.rgb[i + 1] << 8) | thumb.rgb[i + 2]
+    const py = Math.min(thumb.height - 1, Math.floor((y * thumb.height) / (rows * 2)))
+    const px = Math.min(thumb.width - 1, Math.floor((x * thumb.width) / columns))
+    const i = (py * thumb.width + px) * 3
+    return (thumb.rgb[i]! << 16) | (thumb.rgb[i + 1]! << 8) | thumb.rgb[i + 2]!
   }
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < columns; x++) {
@@ -88,25 +92,24 @@ export function rasterCells(thumb: Thumb, columns: number, rows: number): Uint32
   return words
 }
 
-function pixel(line: Uint8Array, i: number, colorType: number, palette: Uint8Array): number[] {
-  switch (colorType) {
-    case 0: return [line[i], line[i], line[i], 255]
-    case 2: return [line[i], line[i + 1], line[i + 2], 255]
-    case 3: return [palette[line[i] * 3] ?? 0, palette[line[i] * 3 + 1] ?? 0, palette[line[i] * 3 + 2] ?? 0, 255]
-    case 4: return [line[i], line[i], line[i], line[i + 1]]
-    default: return [line[i], line[i + 1], line[i + 2], line[i + 3]]
-  }
+// Writes the pixel at byte `i` of an unfiltered line into `out` as RGBA.
+function pixel(line: Uint8Array, i: number, colorType: number, palette: Uint8Array, out: number[]) {
+  const v = line[i]!
+  if (colorType === 0 || colorType === 4) out.fill(v, 0, 3)
+  else if (colorType === 3) for (let c = 0; c < 3; c++) out[c] = palette[v * 3 + c] ?? 0
+  else for (let c = 0; c < 3; c++) out[c] = line[i + c]!
+  out[3] = colorType === 4 ? line[i + 1]! : colorType === 6 ? line[i + 3]! : 255
 }
 
 // PNG filters (spec section 9): each byte is stored as its difference from a predictor.
 function unfilter(type: number, src: Uint8Array, prior: Uint8Array, out: Uint8Array, bpp: number): boolean {
+  if (type > 4) return false
   for (let i = 0; i < src.length; i++) {
-    const left = i >= bpp ? out[i - bpp] : 0
-    const up = prior[i]
-    const upLeft = i >= bpp ? prior[i - bpp] : 0
-    let predicted: number
-    if (type === 0) predicted = 0
-    else if (type === 1) predicted = left
+    const left = i >= bpp ? out[i - bpp]! : 0
+    const up = prior[i]!
+    const upLeft = i >= bpp ? prior[i - bpp]! : 0
+    let predicted = 0
+    if (type === 1) predicted = left
     else if (type === 2) predicted = up
     else if (type === 3) predicted = (left + up) >> 1
     else if (type === 4) {
@@ -115,8 +118,8 @@ function unfilter(type: number, src: Uint8Array, prior: Uint8Array, out: Uint8Ar
       const pb = Math.abs(p - up)
       const pc = Math.abs(p - upLeft)
       predicted = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft
-    } else return false
-    out[i] = (src[i] + predicted) & 0xff
+    }
+    out[i] = (src[i]! + predicted) & 0xff
   }
   return true
 }
@@ -140,38 +143,41 @@ const CODE_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1
 
 type Huffman = { counts: Uint16Array; symbols: Uint16Array }
 
-function huffman(lengths: ArrayLike<number>): Huffman {
+function huffman(lengths: Uint8Array): Huffman {
   const counts = new Uint16Array(16)
-  for (let i = 0; i < lengths.length; i++) counts[lengths[i]]++
+  for (const len of lengths) counts[len]!++
   counts[0] = 0
   const offsets = new Uint16Array(16)
-  for (let len = 1; len < 16; len++) offsets[len] = offsets[len - 1] + counts[len - 1]
+  for (let len = 1; len < 16; len++) offsets[len] = offsets[len - 1]! + counts[len - 1]!
   const symbols = new Uint16Array(lengths.length)
-  for (let symbol = 0; symbol < lengths.length; symbol++) {
-    if (lengths[symbol]) symbols[offsets[lengths[symbol]]++] = symbol
-  }
+  lengths.forEach((len, symbol) => {
+    if (len) symbols[offsets[len]!++] = symbol
+  })
   return { counts, symbols }
 }
 
-const FIXED = (() => {
-  const lengths = new Uint8Array(288)
-  lengths.fill(8, 0, 144).fill(9, 144, 256).fill(7, 256, 280).fill(8, 280, 288)
-  return { lit: huffman(lengths), dist: huffman(new Uint8Array(30).fill(5)) }
-})()
+const FIXED = {
+  lit: huffman(new Uint8Array(288).fill(8, 0, 144).fill(9, 144, 256).fill(7, 256, 280).fill(8, 280, 288)),
+  dist: huffman(new Uint8Array(30).fill(5)),
+}
 
 /** Inflates a zlib stream whose output is exactly `size` bytes; throws on anything malformed. */
 export function inflate(data: Uint8Array, size: number): Uint8Array {
-  if (data.length < 2 || (data[0] & 0x0f) !== 8 || ((data[0] << 8) | data[1]) % 31 !== 0) throw new Error('not zlib')
+  const cmf = data[0] ?? 0
+  if ((cmf & 0x0f) !== 8 || ((cmf << 8) | (data[1] ?? 0)) % 31 !== 0) throw new Error('not zlib')
   const out = new Uint8Array(size)
   let written = 0
   let pos = 2
   let buffer = 0
   let count = 0
 
+  const byte = () => {
+    if (pos >= data.length) throw new Error('truncated')
+    return data[pos++]!
+  }
   const bits = (n: number) => {
     while (count < n) {
-      if (pos >= data.length) throw new Error('truncated')
-      buffer |= data[pos++] << count
+      buffer |= byte() << count
       count += 8
     }
     const value = buffer & ((1 << n) - 1)
@@ -185,17 +191,17 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
     let index = 0
     for (let len = 1; len < 16; len++) {
       code |= bits(1)
-      const n = h.counts[len]
-      if (code - n < first) return h.symbols[index + (code - first)]
+      const n = h.counts[len]!
+      if (code - n < first) return h.symbols[index + (code - first)]!
       index += n
       first = (first + n) << 1
       code <<= 1
     }
     throw new Error('bad code')
   }
-  const put = (byte: number) => {
+  const put = (value: number) => {
     if (written >= size) throw new Error('too long')
-    out[written++] = byte
+    out[written++] = value
   }
 
   let last = 0
@@ -205,12 +211,9 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
     if (type === 0) {
       buffer = 0
       count = 0
-      if (pos + 4 > data.length) throw new Error('truncated')
-      const len = data[pos] | (data[pos + 1] << 8)
-      pos += 4
-      if (pos + len > data.length) throw new Error('truncated')
-      for (let i = 0; i < len; i++) put(data[pos + i])
-      pos += len
+      const len = byte() | (byte() << 8)
+      pos += 2 // the length's complement
+      for (let i = 0; i < len; i++) put(byte())
       continue
     }
     let lit = FIXED.lit
@@ -220,7 +223,7 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
       const ndist = bits(5) + 1
       const ncode = bits(4) + 4
       const codeLengths = new Uint8Array(19)
-      for (let i = 0; i < ncode; i++) codeLengths[CODE_ORDER[i]] = bits(3)
+      for (let i = 0; i < ncode; i++) codeLengths[CODE_ORDER[i]!] = bits(3)
       const lencode = huffman(codeLengths)
       const lengths = new Uint8Array(nlen + ndist)
       for (let i = 0; i < nlen + ndist; ) {
@@ -233,7 +236,7 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
         let value = 0
         if (symbol === 16) {
           if (i === 0) throw new Error('repeat with no length')
-          value = lengths[i - 1]
+          value = lengths[i - 1]!
           repeat = 3 + bits(2)
         } else if (symbol === 17) repeat = 3 + bits(3)
         else repeat = 11 + bits(7)
@@ -252,14 +255,18 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
       }
       const s = symbol - 257
       if (s >= 29) throw new Error('bad length')
-      const len = LENGTH_BASE[s] + bits(LENGTH_EXTRA[s])
+      const len = LENGTH_BASE[s]! + bits(LENGTH_EXTRA[s]!)
       const d = decode(dist)
       if (d >= 30) throw new Error('bad distance')
-      const back = DIST_BASE[d] + bits(DIST_EXTRA[d])
+      const back = DIST_BASE[d]! + bits(DIST_EXTRA[d]!)
       if (back > written) throw new Error('distance too far')
-      for (let i = 0; i < len; i++) put(out[written - back])
+      for (let i = 0; i < len; i++) put(out[written - back]!)
     }
   }
   if (written !== size) throw new Error('too short')
   return out
 }
+
+// Uint8Array.fromBase64 and toBase64 run here but aren't in the es2023 lib the types target.
+export const fromBase64 = (base64: string) => Uint8Array.from(atob(base64), char => char.charCodeAt(0))
+export const toBase64 = (bytes: Uint8Array) => btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''))

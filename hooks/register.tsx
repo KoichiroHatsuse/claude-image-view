@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { PastedImage } from '../types'
 import { fitRow, imageNumbers, pngSize } from './layout'
 import type { Size } from './layout'
-import { decodePng, rasterCells } from './png'
+import { decodePng, fromBase64, rasterCells, toBase64 } from './png'
 import type { Thumb } from './png'
 
 // Pasting an image raises no prompt.edit (the tag only shows up on the next keystroke),
@@ -27,7 +27,7 @@ const decoded = new Map<string, { size: Size | null; thumb: Thumb | null } | nul
 // Image draws pixels in kitty and Ghostty only (the alt text elsewhere), so pick it only
 // there. CLAUDE_CODE_FORCE_TERMINAL_IMAGES is what turns them on in a background session.
 async function terminalDrawsPixels($: EngineInterface): Promise<boolean> {
-  if (await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')) return true
+  if (/^(1|true)$/i.test((await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')) ?? '')) return true
   const term = (await $.env.get('TERM')) ?? ''
   return term.startsWith('xterm-kitty') || term.startsWith('xterm-ghostty')
 }
@@ -66,7 +66,7 @@ async function load($: EngineInterface, path: string) {
     const size = pngSize(base64)
     return size === null ? null : { size, thumb: null }
   }
-  const thumb = decodePng(Uint8Array.fromBase64(base64))
+  const thumb = decodePng(fromBase64(base64))
   return thumb === null ? null : { size: thumb.source, thumb }
 }
 
@@ -143,7 +143,7 @@ export const register: Register = on => {
                     key={`image-${image.n}`}
                     columns={columns}
                     rows={rows}
-                    cells={new Uint8Array(rasterCells(thumb, columns, rows).buffer).toBase64()}
+                    cells={toBase64(new Uint8Array(rasterCells(thumb, columns, rows).buffer))}
                   />
                 ) : (
                   <Image
