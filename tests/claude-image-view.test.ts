@@ -11,6 +11,8 @@ function pngHead(width: number, height: number): string {
   return btoa(String.fromCharCode(...bytes))
 }
 
+const posix = (path: string) => path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '')
+
 test('image numbers come from the draft, deduplicated, in order', () => {
   expect(imageNumbers('look [Image #2] and [Image #1] again [Image #2]')).toEqual([2, 1])
   expect(imageNumbers('[Image 1] [image #3] #4')).toEqual([])
@@ -69,7 +71,8 @@ test('a pasted image shows without another keystroke and clears when the draft d
       { name: '-work', kind: 'dir', ...entry },
     ],
   }))
-  on('fs.exists', ($, e) => ({ value: e.path === dir || e.path === `${dir}/1.png` }))
+  // On Windows the engine hands hooks resolved paths (C:\tmp\...), so compare in POSIX form.
+  on('fs.exists', ($, e) => ({ value: [dir, `${dir}/1.png`].includes(posix(e.path)) }))
   on('fs.read', () => ({ value: { base64: pngHead(800, 400) } }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
 
