@@ -184,6 +184,8 @@ test('a paste read while half-written is drawn once the file is complete', async
   expect(await half.find({ key: 'open-3' })).toBeDefined()
   await half.unmount()
 
+  // A slow write: the next poll still sees the same partial file.
+  await clock.advance(200)
   isWritten = true
   await clock.advance(200)
   const whole = await $.ui.mount({ ...BAND, surface: 'terminal' })

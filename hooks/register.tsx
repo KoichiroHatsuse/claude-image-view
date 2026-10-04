@@ -18,6 +18,8 @@ let found: { sessionId: string; dir: string } | undefined
 // The image numbers last drawn, so an unchanged draft doesn't rewrite state; undefined
 // while a drawn image's file is still missing, so the next poll looks again.
 let shownKey: string | undefined
+// What was last written to the images atom, so a poll that changes nothing doesn't redraw.
+let shownJson = ''
 let isChecking = false
 // Whether the terminal draws Image pixels; elsewhere each picture is a Raster of quadrant blocks.
 let drawsPixels = false
@@ -81,16 +83,15 @@ async function load($: EngineInterface, path: string) {
   return thumb && { size: thumb.source, thumb }
 }
 
-// isMissing (so the next poll looks again) while the file isn't there yet, and the first time
-// it fails to load, in case that was a half-written paste. Failing again with the same size and
-// mtime settles it: an undrawable tile that can still open the original.
+// isMissing (so the next poll looks again) while the file isn't there or doesn't load, since
+// it may be a paste still being written. The polls then only stat it: the cache, keyed by size
+// and mtime, reads it again only once it changes.
 async function describe($: EngineInterface, dir: string | undefined, n: number) {
   const path = `${dir}/${n}.png`
   const stat = dir === undefined ? undefined : await $.fs.stat(path).catch(() => undefined)
   if (stat?.kind !== 'file') return { image: { n, path: null, size: null }, isMissing: true }
   const key = `${path}|${stat.size}|${stat.mtimeMs}`
   let entry = decoded.get(key)
-  const isFirstTry = entry === undefined
   if (entry === undefined) {
     entry = await load($, path)
     decoded.set(key, entry)
@@ -98,7 +99,7 @@ async function describe($: EngineInterface, dir: string | undefined, n: number) 
   const image: PastedImage = entry
     ? { n, path, size: entry.size, thumbKey: entry.thumb ? key : undefined }
     : { n, path, size: null, isUndrawable: true }
-  return { image, isMissing: entry === null && isFirstTry }
+  return { image, isMissing: entry === null }
 }
 
 // Opens the original in the OS's own viewer, since a thumbnail (a mosaic most of all) only
@@ -116,7 +117,11 @@ async function show($: EngineInterface, draft: string) {
   const dir = numbers.length > 0 ? await imagesDir($) : undefined
   const described = await Promise.all(numbers.map(n => describe($, dir, n)))
   shownKey = described.some(d => d.isMissing) ? undefined : key
-  await update($, images, () => described.map(d => d.image))
+  const list = described.map(d => d.image)
+  const json = JSON.stringify(list)
+  if (json === shownJson) return
+  shownJson = json
+  await update($, images, () => list)
 }
 
 async function check($: EngineInterface) {
