@@ -1,3 +1,5 @@
+import { fromBase64 } from './png'
+
 export type Size = { width: number; height: number }
 export type Cells = { columns: number; rows: number }
 
@@ -23,7 +25,7 @@ export function imageNumbers(draft: string): number[] {
 /** Width and height from a PNG's IHDR chunk, or null when the bytes aren't a PNG. */
 export function pngSize(base64: string): Size | null {
   // 24 bytes cover the signature and IHDR's width and height; 32 base64 chars decode to exactly 24.
-  const head = Uint8Array.from(atob(base64.slice(0, 32)), char => char.charCodeAt(0))
+  const head = fromBase64(base64.slice(0, 32))
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
   if (head.length < 24 || signature.some((byte, i) => head[i] !== byte)) return null
   const view = new DataView(head.buffer, head.byteOffset, head.byteLength)

@@ -21,6 +21,7 @@ let shownKey: string | undefined
 let isChecking = false
 // Whether the terminal draws Image pixels; elsewhere each picture is a Raster of quadrant blocks.
 let drawsPixels = false
+let isWindows: boolean | undefined
 // Keyed by path, size and mtime, so a file that failed to decode isn't read again until it changes.
 const decoded = new Map<string, { size: Size | null; thumb: Thumb | null } | null>()
 
@@ -32,14 +33,21 @@ async function terminalDrawsPixels($: EngineInterface): Promise<boolean> {
   return term.startsWith('xterm-kitty') || term.startsWith('xterm-ghostty')
 }
 
+async function onWindows($: EngineInterface): Promise<boolean> {
+  isWindows ??= (await $.env.get('OS')) === 'Windows_NT'
+  return isWindows
+}
+
 // Claude Code caches each paste as <tmp>/<project>/<session>/images/<n>.png, where <tmp> is
 // %TEMP%\claude on Windows and /tmp/claude-<uid> elsewhere. The project folder is named after
 // a working directory that may since have moved, so find it by the session id instead.
-async function findTmpRoot($: EngineInterface): Promise<string> {
+async function findTmpRoot($: EngineInterface): Promise<string | undefined> {
   const fromEnv = await $.env.get('CLAUDE_CODE_TMPDIR')
   if (fromEnv) return fromEnv
-  const temp = (await $.env.get('TEMP')) ?? (await $.env.get('TMP'))
-  if (temp) return `${temp.replaceAll('\\', '/')}/claude`
+  if (await onWindows($)) {
+    const temp = (await $.env.get('TEMP')) ?? (await $.env.get('TMP'))
+    return temp && `${temp.replaceAll('\\', '/')}/claude`
+  }
   return `/tmp/claude-${(await $.process.run(['id', '-u'])).stdout.trim()}`
 }
 
@@ -60,39 +68,41 @@ async function imagesDir($: EngineInterface): Promise<string | undefined> {
 }
 
 // Reads the whole file: its size for an Image, and its pixels too when it's drawn as a Raster.
+// null when it can't be drawn.
 async function load($: EngineInterface, path: string) {
-  const { base64 } = await $.fs.read(path, { as: 'bytes' })
+  const read = await $.fs.read(path, { as: 'bytes' }).catch(() => undefined)
+  // Over $.fs.read's 4 MiB cap: an Image still draws it, just without its aspect ratio.
+  if (read === undefined) return drawsPixels ? { size: null, thumb: null } : null
   if (drawsPixels) {
-    const size = pngSize(base64)
-    return size === null ? null : { size, thumb: null }
+    const size = pngSize(read.base64)
+    return size && { size, thumb: null }
   }
-  const thumb = decodePng(fromBase64(base64))
-  return thumb === null ? null : { size: thumb.source, thumb }
+  const thumb = decodePng(fromBase64(read.base64))
+  return thumb && { size: thumb.source, thumb }
 }
 
-async function describe($: EngineInterface, dir: string | undefined, n: number): Promise<PastedImage> {
+// isMissing while the file isn't there yet, so the next poll looks again. A file that is
+// there but can't be drawn is settled: it keeps its "no preview" tile and stops the polling.
+async function describe($: EngineInterface, dir: string | undefined, n: number) {
   const path = `${dir}/${n}.png`
   const stat = dir === undefined ? undefined : await $.fs.stat(path).catch(() => undefined)
-  if (stat?.kind !== 'file') return { n, path: null, size: null }
+  if (stat?.kind !== 'file') return { image: { n, path: null, size: null }, isMissing: true }
   const key = `${path}|${stat.size}|${stat.mtimeMs}`
-  if (!decoded.has(key)) {
-    decoded.set(
-      key,
-      await load($, path).catch(() =>
-        // Over $.fs.read's 4 MiB cap: an Image still draws it, just without its aspect ratio.
-        drawsPixels ? { size: null, thumb: null } : null,
-      ),
-    )
+  let entry = decoded.get(key)
+  if (entry === undefined) {
+    entry = await load($, path)
+    decoded.set(key, entry)
   }
-  const entry = decoded.get(key)
-  if (entry === null || entry === undefined) return { n, path: null, size: null }
-  return { n, path, size: entry.size, thumbKey: entry.thumb ? key : undefined }
+  const image: PastedImage = entry
+    ? { n, path, size: entry.size, thumbKey: entry.thumb ? key : undefined }
+    : { n, path: null, size: null }
+  return { image, isMissing: false }
 }
 
 // Opens the original in the OS's own viewer, since a thumbnail (a mosaic most of all) only
 // tells pictures apart. argv, no shell: the path goes to the viewer as one argument.
 async function openImage($: EngineInterface, path: string) {
-  if ((await $.env.get('OS')) === 'Windows_NT') return $.process.run(['explorer.exe', path.replaceAll('/', '\\')])
+  if (await onWindows($)) return $.process.run(['explorer.exe', path.replaceAll('/', '\\')])
   const isMac = (await $.process.run(['uname'])).stdout.trim() === 'Darwin'
   return $.process.run([isMac ? 'open' : 'xdg-open', path])
 }
@@ -102,10 +112,9 @@ async function show($: EngineInterface, draft: string) {
   const key = numbers.join(',')
   if (key === shownKey) return
   const dir = numbers.length > 0 ? await imagesDir($) : undefined
-  const list: PastedImage[] = []
-  for (const n of numbers) list.push(await describe($, dir, n))
-  shownKey = list.every(image => image.path !== null) ? key : undefined
-  await update($, images, () => list)
+  const described = await Promise.all(numbers.map(n => describe($, dir, n)))
+  shownKey = described.some(d => d.isMissing) ? undefined : key
+  await update($, images, () => described.map(d => d.image))
 }
 
 async function check($: EngineInterface) {
@@ -137,47 +146,40 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" columnGap={1}>
-          {list.map((image, i) => {
+          {list.map(({ n, path, thumbKey }, i) => {
             const { columns, rows } = cells[i] ?? { columns: 4, rows: 1 }
-            const thumb = image.thumbKey === undefined ? undefined : decoded.get(image.thumbKey)?.thumb
-            return (
-              <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
-                {image.path === null ? (
+            const thumb = thumbKey === undefined ? undefined : decoded.get(thumbKey)?.thumb
+            if (path === null) {
+              return (
+                <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
                   <Box width={columns} height={rows} alignItems="center" justifyContent="center">
                     <Text dimColor wrap="truncate">no preview</Text>
                   </Box>
-                ) : thumb ? (
+                  <Text dimColor>#{n}</Text>
+                </Box>
+              )
+            }
+            return (
+              <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
+                {thumb ? (
                   <Raster
-                    key={`image-${image.n}`}
+                    key={`image-${n}`}
                     columns={columns}
                     rows={rows}
                     cells={toBase64(new Uint8Array(rasterCells(thumb, columns, rows).buffer))}
                   />
                 ) : (
-                  <Image
-                    key={`image-${image.n}`}
-                    source={{ file: image.path, format: 'png' }}
-                    columns={columns}
-                    rows={rows}
-                    alt={`[Image #${image.n}]`}
-                  />
+                  <Image key={`image-${n}`} source={{ file: path, format: 'png' }} columns={columns} rows={rows} alt={`[Image #${n}]`} />
                 )}
-                {image.path === null ? (
-                  <Text dimColor>#{image.n}</Text>
-                ) : (
-                  // A click, or the digit while the band has the focus (ctrl+x tab), opens it.
-                  <Button
-                    key={`open-${image.n}`}
-                    label={`#${image.n} open`}
-                    hotkey={image.n <= 9 ? String(image.n) : undefined}
-                    plain
-                    dimColor
-                    onPress={() => {
-                      const path = image.path
-                      if (path !== null) openImage($, path).catch(() => $.ui.toast(`Couldn't open image #${image.n}`))
-                    }}
-                  />
-                )}
+                {/* A click, or the digit while the band has the focus (ctrl+x tab), opens it. */}
+                <Button
+                  key={`open-${n}`}
+                  label={`#${n} open`}
+                  {...(n <= 9 && { hotkey: String(n) })}
+                  plain
+                  dimColor
+                  onPress={() => openImage($, path).catch(() => $.ui.toast(`Couldn't open image #${n}`))}
+                />
               </Box>
             )
           })}

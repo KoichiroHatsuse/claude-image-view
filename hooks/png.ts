@@ -4,8 +4,10 @@
 //
 // Indexing below is bounds-checked by the loops around it, hence the `!`s.
 
+import type { Size } from './layout'
+
 /** A picture shrunk to at most THUMB pixels a side: RGB, 3 bytes a pixel, row-major. */
-export type Thumb = { width: number; height: number; rgb: Uint8Array; source: { width: number; height: number } }
+export type Thumb = Size & { rgb: Uint8Array; source: Size }
 
 const THUMB = 64
 // ponytail: transparent pixels are blended onto one dark grey, not the terminal's background;
@@ -217,7 +219,7 @@ const FIXED = {
 }
 
 /** Inflates a zlib stream whose output is exactly `size` bytes; throws on anything malformed. */
-export function inflate(data: Uint8Array, size: number): Uint8Array {
+function inflate(data: Uint8Array, size: number): Uint8Array {
   const cmf = data[0] ?? 0
   if ((cmf & 0x0f) !== 8 || ((cmf << 8) | (data[1] ?? 0)) % 31 !== 0) throw new Error('not zlib')
   const out = new Uint8Array(size)
@@ -323,5 +325,10 @@ export function inflate(data: Uint8Array, size: number): Uint8Array {
 }
 
 // Uint8Array.fromBase64 and toBase64 run here but aren't in the es2023 lib the types target.
-export const fromBase64 = (base64: string) => Uint8Array.from(atob(base64), char => char.charCodeAt(0))
+export function fromBase64(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
 export const toBase64 = (bytes: Uint8Array) => btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''))
