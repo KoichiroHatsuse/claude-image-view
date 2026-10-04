@@ -131,6 +131,8 @@ test('in Ghostty a pasted image shows as pixels and clears when the draft does',
   // #2 has no cached file, so it gets a placeholder tile instead of a broken Image.
   expect(await ui.find({ type: 'Text', text: 'no preview' })).toBeDefined()
   // The label under it opens the original on macOS; #2, with nothing to open, has no button.
+  // A line says how to press it from the keyboard, since a click may not reach the band.
+  expect(await ui.find({ type: 'Text', text: /ctrl\+x tab, then the number/ })).toBeDefined()
   await ui.press({ key: 'open-1' })
   expect(runs.at(-1)).toEqual(['open', `${dir}/1.png`])
   expect(await ui.find({ key: 'open-2' })).toBeUndefined()
