@@ -81,22 +81,24 @@ async function load($: EngineInterface, path: string) {
   return thumb && { size: thumb.source, thumb }
 }
 
-// isMissing while the file isn't there yet, so the next poll looks again. A file that is
-// there but can't be drawn is settled: it keeps its "no preview" tile and stops the polling.
+// isMissing (so the next poll looks again) while the file isn't there yet, and the first time
+// it fails to load, in case that was a half-written paste. Failing again with the same size and
+// mtime settles it: an undrawable tile that can still open the original.
 async function describe($: EngineInterface, dir: string | undefined, n: number) {
   const path = `${dir}/${n}.png`
   const stat = dir === undefined ? undefined : await $.fs.stat(path).catch(() => undefined)
   if (stat?.kind !== 'file') return { image: { n, path: null, size: null }, isMissing: true }
   const key = `${path}|${stat.size}|${stat.mtimeMs}`
   let entry = decoded.get(key)
+  const isFirstTry = entry === undefined
   if (entry === undefined) {
     entry = await load($, path)
     decoded.set(key, entry)
   }
   const image: PastedImage = entry
     ? { n, path, size: entry.size, thumbKey: entry.thumb ? key : undefined }
-    : { n, path: null, size: null }
-  return { image, isMissing: false }
+    : { n, path, size: null, isUndrawable: true }
+  return { image, isMissing: entry === null && isFirstTry }
 }
 
 // Opens the original in the OS's own viewer, since a thumbnail (a mosaic most of all) only
@@ -146,22 +148,16 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" columnGap={1}>
-          {list.map(({ n, path, thumbKey }, i) => {
+          {list.map(({ n, path, thumbKey, isUndrawable }, i) => {
             const { columns, rows } = cells[i] ?? { columns: 4, rows: 1 }
             const thumb = thumbKey === undefined ? undefined : decoded.get(thumbKey)?.thumb
-            if (path === null) {
-              return (
-                <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
+            return (
+              <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
+                {path === null || isUndrawable ? (
                   <Box width={columns} height={rows} alignItems="center" justifyContent="center">
                     <Text dimColor wrap="truncate">no preview</Text>
                   </Box>
-                  <Text dimColor>#{n}</Text>
-                </Box>
-              )
-            }
-            return (
-              <Box flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
-                {thumb ? (
+                ) : thumb ? (
                   <Raster
                     key={`image-${n}`}
                     columns={columns}
@@ -171,15 +167,19 @@ export const register: Register = on => {
                 ) : (
                   <Image key={`image-${n}`} source={{ file: path, format: 'png' }} columns={columns} rows={rows} alt={`[Image #${n}]`} />
                 )}
-                {/* A click, or the digit while the band has the focus (ctrl+x tab), opens it. */}
-                <Button
-                  key={`open-${n}`}
-                  label={`#${n} open`}
-                  {...(n <= 9 && { hotkey: String(n) })}
-                  plain
-                  dimColor
-                  onPress={() => openImage($, path).catch(() => $.ui.toast(`Couldn't open image #${n}`))}
-                />
+                {path === null ? (
+                  <Text dimColor>#{n}</Text>
+                ) : (
+                  // A click, or the digit while the band has the focus (ctrl+x tab), opens it.
+                  <Button
+                    key={`open-${n}`}
+                    label={`#${n} open`}
+                    {...(n <= 9 && { hotkey: String(n) })}
+                    plain
+                    dimColor
+                    onPress={() => openImage($, path).catch(() => $.ui.toast(`Couldn't open image #${n}`))}
+                  />
+                )}
               </Box>
             )
           })}

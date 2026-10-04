@@ -160,3 +160,32 @@ test('in Windows Terminal the cache is found under %TEMP% and drawn as a Raster'
   await ui.press({ key: 'open-1' })
   expect(runs).toEqual([['explorer.exe', 'C:\\Users\\me\\AppData\\Local\\Temp\\claude\\-work\\sess-1\\images\\1.png']])
 })
+
+test('a paste read while half-written is drawn once the file is complete', async ($, on) => {
+  const clock = mock.clock(on)
+  const dir = '/Users/me/AppData/Local/Temp/claude/-work/sess-1/images'
+  let isWritten = false
+  mock.env(on, { OS: 'Windows_NT', TEMP: 'C:\\Users\\me\\AppData\\Local\\Temp' })
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: '[Image #3]', cursor: 10 } }))
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }))
+  on('fs.exists', ($, e) => ({ value: posix(e.path) === dir }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: isWritten ? 2 : 1, mtimeMs: 0, isLink: false } }))
+  // The first read catches the PNG cut off partway through its data.
+  on('fs.read', () => ({ value: { base64: isWritten ? RGBW : RGBW.slice(0, 60) } }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await clock.advance(200)
+  const half = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await half.find({ type: 'Raster' })).toBeUndefined()
+  // Undrawable for now, but the original can still be opened.
+  expect(await half.find({ key: 'open-3' })).toBeDefined()
+  await half.unmount()
+
+  isWritten = true
+  await clock.advance(200)
+  const whole = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await whole.find({ type: 'Raster' })).toBeDefined()
+})

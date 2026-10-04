@@ -10,6 +10,7 @@ import type { Size } from './layout'
 export type Thumb = Size & { rgb: Uint8Array; source: Size }
 
 const THUMB = 64
+const MAX_PIXELS = 40_000_000
 // ponytail: transparent pixels are blended onto one dark grey, not the terminal's background;
 // pasted screenshots are opaque, so read the terminal's colours if logos with alpha matter.
 const BACKDROP = 0x1e
@@ -39,6 +40,9 @@ export function decodePng(bytes: Uint8Array): Thumb | null {
     at += 12 + length
   }
   if (colorType === 3 && palette.length === 0) return null
+  // Deflate packs ~1000:1, so a file under $.fs.read's 4 MiB cap could claim gigabytes; 8K is
+  // about 33M pixels.
+  if (width * height > MAX_PIXELS) return null
 
   const stride = width * channels
   let raw: Uint8Array
