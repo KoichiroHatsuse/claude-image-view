@@ -147,7 +147,10 @@ export const register: Register = on => {
     if (list.length === 0) return next(e)
 
     const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
-    const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns)
+    // Windows Terminal's main screen doesn't pass clicks on to the band, so say how to press
+    // the open buttons from the keyboard. The line takes one row from the tiles.
+    const hasHint = list.some(({ n, path }) => path !== null && n <= 9)
+    const cells = fitRow(list.map(image => image.size), e.props.maxRows - (hasHint ? 1 : 0), e.props.bodyColumns)
     const below = await next(e)
 
     return (
@@ -175,7 +178,8 @@ export const register: Register = on => {
                 {path === null ? (
                   <Text dimColor>#{n}</Text>
                 ) : (
-                  // A click, or the digit while the band has the focus (ctrl+x tab), opens it.
+                  // Its digit while the band has the focus (ctrl+x tab) opens it, or a click where
+                  // the terminal passes clicks on.
                   <Button
                     key={`open-${n}`}
                     label={`#${n} open`}
@@ -189,6 +193,7 @@ export const register: Register = on => {
             )
           })}
         </Box>
+        {hasHint ? <Text dimColor>ctrl+x tab, then the number: open the original</Text> : null}
         {below}
       </Box>
     )

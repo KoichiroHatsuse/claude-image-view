@@ -51,7 +51,7 @@ Paste one or more images and a row of thumbnails sits above the prompt, each lab
 - **Thumbnails keep their shape.** Wide screenshots stay wide and phone shots stay tall.
 - **Always fits on screen.** Tiles shrink to fit the space above the prompt, so the row never scrolls or gets cut off.
 - **Clears on send.** Once the prompt is sent (or the tags are deleted), the row goes away.
-- **Opens the original.** Click the `#1 open` label under a tile (or press `ctrl+x tab`, then the digit) to open the full image in your OS's viewer: Photos on Windows, Preview on macOS, `xdg-open` on Linux.
+- **Opens the original.** Press `ctrl+x`, `tab`, then the image's number (`1`–`9`) to open the full image in your OS's viewer: Photos on Windows, Preview on macOS, `xdg-open` on Linux. A hint line under the tiles says so. Clicking the `#1 open` label works only where the terminal passes clicks on to Claude Code; Windows Terminal's main screen doesn't.
 
 ## How It Works
 
