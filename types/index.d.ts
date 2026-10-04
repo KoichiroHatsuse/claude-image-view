@@ -4,6 +4,10 @@ export type PastedImage = {
   path: string | null
   /** Pixel size; null when unknown, and the tile falls back to a default shape. */
   size: { width: number; height: number } | null
+  /** Where the decoded thumb is cached, when the terminal draws it as a Raster. */
+  thumbKey?: string
+  /** The file is there but this mod can't draw it (not a PNG it reads, or too big to read). */
+  isUndrawable?: boolean
 }
 
 declare module 'claude-code' {
