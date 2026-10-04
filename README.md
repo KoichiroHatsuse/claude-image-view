@@ -2,6 +2,8 @@
 
 A Claude Code mod that shows the images you paste, so you see thumbnails above your prompt instead of bare `[Image #1]` tags.
 
+> This is a fork of [jarrodwatts/claude-image-view](https://github.com/jarrodwatts/claude-image-view). It adds Windows support, a block-mosaic thumbnail for terminals without the kitty graphics protocol, and a button that opens the original. Upstream changes are merged here only after review, so install from this repository.
+
 [![License](https://img.shields.io/github/license/jarrodwatts/claude-image-view?v=2)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/jarrodwatts/claude-image-view)](https://github.com/jarrodwatts/claude-image-view/stargazers)
 
@@ -12,7 +14,7 @@ A Claude Code mod that shows the images you paste, so you see thumbnails above y
 Inside Claude Code, run:
 
 ```
-/plugin marketplace add jarrodwatts/claude-image-view
+/plugin marketplace add KoichiroHatsuse/claude-image-view
 /plugin install image-view
 /reload-plugins
 ```
@@ -23,7 +25,7 @@ That's it. Paste an image into the prompt and its thumbnail appears above the in
 <summary><strong>Prefer the terminal?</strong></summary>
 
 ```bash
-claude plugin marketplace add jarrodwatts/claude-image-view
+claude plugin marketplace add KoichiroHatsuse/claude-image-view
 claude plugin install image-view@claude-image-view
 ```
 
@@ -79,7 +81,7 @@ Pasted images over 4 MiB get no mosaic, since the mod can't read files that big.
 
 **Nothing appears when I paste.** Run `/plugin` and check the dim line under the tabs lists `image-view` as an active mod. If it isn't listed, run `/reload-plugins`.
 
-**The tile says "no preview".** The mod couldn't find the cached file. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/jarrodwatts/claude-image-view/issues) with your Claude Code version.
+**The tile says "no preview".** The mod couldn't find the cached file. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/KoichiroHatsuse/claude-image-view/issues) with your Claude Code version.
 
 **The tile shows `[Image #1]` text instead of the picture.** The mod took your terminal for Ghostty or kitty (from `TERM` or `CLAUDE_CODE_FORCE_TERMINAL_IMAGES`), but it can't draw images. Unset whichever one is wrong to get the mosaic instead.
 
@@ -92,7 +94,7 @@ Pasted images over 4 MiB get no mosaic, since the mod can't read files that big.
 ## Development
 
 ```bash
-git clone https://github.com/jarrodwatts/claude-image-view
+git clone https://github.com/KoichiroHatsuse/claude-image-view
 cd claude-image-view
 
 # Load it for one session without installing
